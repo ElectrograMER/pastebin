@@ -6,7 +6,7 @@ const router = express.Router();
 
 function nowMs(req) {
   if (process.env.TEST_MODE === "1" && req.headers["x-test-now-ms"]) {
-    return parseInt(req.headers["x-test-now-ms"]);
+    return parseInt(req.headers["x-test-now-ms"], 10);
   }
   return Date.now();
 }
@@ -15,7 +15,7 @@ router.get("/api/healthz", async (req, res) => {
   try {
     await redis.ping();
     res.json({ ok: true });
-  } catch {
+  } catch (err) {
     res.status(500).json({ ok: false });
   }
 });
@@ -23,7 +23,7 @@ router.get("/api/healthz", async (req, res) => {
 router.post("/api/pastes", async (req, res) => {
   const { content, ttl_seconds, max_views } = req.body;
 
-  if (!content || typeof content !== "string") {
+  if (typeof content !== "string" || content.trim() === "") {
     return res.status(400).json({ error: "Invalid content" });
   }
 
@@ -37,13 +37,15 @@ router.post("/api/pastes", async (req, res) => {
 
   const id = nanoid(10);
 
+  const expiresAt = ttl_seconds
+    ? nowMs(req) + ttl_seconds * 1000
+    : "";
+
   await redis.hset(`paste:${id}`, {
     content,
-    ttl_seconds: ttl_seconds ?? "",
+    expires_at: expiresAt,
     max_views: max_views ?? ""
   });
-
-  if (ttl_seconds) await redis.expire(`paste:${id}`, ttl_seconds);
 
   res.json({
     id,
@@ -57,21 +59,25 @@ router.get("/api/pastes/:id", async (req, res) => {
 
   if (!paste.content) return res.status(404).json({ error: "Not found" });
 
-  if (paste.max_views) {
-    const used = await redis.incr(`${key}:views`);
-    if (used > parseInt(paste.max_views)) return res.status(404).json({ error: "Not found" });
+  if (paste.expires_at && nowMs(req) > parseInt(paste.expires_at)) {
+    return res.status(404).json({ error: "Not found" });
   }
 
   let remaining = null;
+
   if (paste.max_views) {
-    const used = parseInt(await redis.get(`${key}:views`) || "0");
+    const used = await redis.incr(`${key}:views`);
+
+    if (used > parseInt(paste.max_views)) {
+      return res.status(404).json({ error: "Not found" });
+    }
+
     remaining = Math.max(parseInt(paste.max_views) - used, 0);
   }
 
   let expires_at = null;
-  if (paste.ttl_seconds) {
-    const ttl = await redis.ttl(key);
-    if (ttl > 0) expires_at = new Date(nowMs(req) + ttl * 1000).toISOString();
+  if (paste.expires_at) {
+    expires_at = new Date(parseInt(paste.expires_at)).toISOString();
   }
 
   res.json({
@@ -87,15 +93,21 @@ router.get("/p/:id", async (req, res) => {
 
   if (!paste.content) return res.sendStatus(404);
 
+  if (paste.expires_at && nowMs(req) > parseInt(paste.expires_at)) {
+    return res.sendStatus(404);
+  }
+
   if (paste.max_views) {
     const used = await redis.incr(`${key}:views`);
     if (used > parseInt(paste.max_views)) return res.sendStatus(404);
   }
 
+  const safe = paste.content.replace(/</g, "&lt;");
+
   res.send(`
 <html>
 <body>
-<pre>${paste.content.replace(/</g, "&lt;")}</pre>
+<pre>${safe}</pre>
 </body>
 </html>
 `);
@@ -108,13 +120,15 @@ router.post("/create", async (req, res) => {
 
   const id = nanoid(10);
 
+  const expiresAt = ttl_seconds
+    ? nowMs(req) + parseInt(ttl_seconds) * 1000
+    : "";
+
   await redis.hset(`paste:${id}`, {
     content,
-    ttl_seconds: ttl_seconds || "",
+    expires_at: expiresAt,
     max_views: max_views || ""
   });
-
-  if (ttl_seconds) await redis.expire(`paste:${id}`, parseInt(ttl_seconds));
 
   const url = `${req.protocol}://${req.get("host")}/p/${id}`;
 
