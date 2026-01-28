@@ -45,3 +45,4 @@ npm start (for backend)
 
 (for frontend)-> cd src -> cd frontend-> npx serve
 
+# pastebin
