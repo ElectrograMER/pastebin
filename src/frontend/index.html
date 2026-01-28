@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Pastebin Lite</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+  <div class="container">
+    <h2>Pastebin Lite</h2>
+
+    <form method="POST" action="http://localhost:3000/create">
+
+      <textarea name="content" rows="10" required placeholder="Paste your text here..."></textarea>
+
+      <div class="field">
+        <label>TTL seconds</label>
+        <input name="ttl_seconds" type="number">
+      </div>
+
+      <div class="field">
+        <label>Max views</label>
+        <input name="max_views" type="number">
+      </div>
+
+      <button>Create Paste</button>
+
+    </form>
+  </div>
+</body>
+</html>
